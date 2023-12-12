@@ -1,0 +1,146 @@
+#!/usr/bin/env python
+# coding: utf-8
+
+# In[2]:
+
+
+# Import necessary libraries
+   
+import requests
+import pandas as pd
+import pyodbc
+from sqlalchemy import create_engine
+
+
+# In[3]:
+
+
+# Make an HTTP request using the requests library
+
+main_url = "https://www.premierleague.com/stats/top/players/goals"
+
+# Define the base URL and parameters
+# I have found the API by going into RMC -> Inspect -> Network tab -> filter goals -> Click next arrow on the page -> New result shows up
+# Click on it -> Request URL = API i used
+
+full_api = "https://footballapi.pulselive.com/football/stats/ranked/players/goals?page=1&pageSize=10&compSeasons=489&comps=1&compCodeForActivePlayer=EN_PR&altIds=true"
+
+short_api = "https://footballapi.pulselive.com/football/stats/ranked/players/goals"
+params = {
+   "page": 0, #it has to be 0 in order to start from the beginning
+   "pageSize": 1000, #If i left this value at 10 it will export only 10 players visible on the page, 199 is the number of entries which can be found in preview tab.
+   "compSeasons": 489, #id from full_api
+   "comps": 1, #id from full_api
+   "compCodeForActivePlayer": "EN_PR", #id from full_api
+   "altIds": "true" #id from full_api
+}
+
+# Specify headers 
+headers = {
+   "Origin": "https://www.premierleague.com",
+}
+
+# Send the GET request - The code sets the HTTP header "Origin" to "https://www.premierleague.com," indicating the source of the request when making an HTTP call, commonly used for security checks based on the Same-Origin Policy.
+response = requests.get(short_api, headers=headers, params=params)
+
+print(response)
+
+
+# In[21]:
+
+
+# Check if proper data is being exported
+
+# Check if the request was successful
+if response.status_code == 200:
+   # Parse the JSON response
+   data = response.json()
+
+   # Iterate through each player in the content
+   for player in data['stats']['content']:
+       player_name = player['owner']['name']['display']
+       # Check if 'currentTeam' key exists in the 'owner' dictionary
+       if 'currentTeam' in player['owner'] and 'name' in player['owner']['currentTeam']:
+           team_name = player['owner']['currentTeam']['name']
+       else:
+           team_name = "Unknown Team"
+
+       goals = player['value']
+       print(f"{player_name}, {team_name}, Goals: {goals}")
+
+
+# In[19]:
+
+
+# Import data from website to PremierLeagueStats DB on localhost using Windows Authentication
+
+# Check if the request was successful
+if response.status_code == 200:
+   # Parse the JSON response
+   data = response.json()
+
+   # Database connection parameters for Windows Authentication
+   server = "localhost\SQLEXPRESS"
+   database = "PremierLeagueStats"
+
+   # Format the connection string for Windows Authentication
+   connection = pyodbc.connect("DRIVER={ODBC Driver 17 for SQL Server};" +
+                               "SERVER=localhost\SQLEXPRESS;PORT=1433;" +
+                               "DATABASE=PremierLeagueStats;trusted_connection=yes")
+
+   try:
+       # Create a database engine
+       engine = create_engine(f"mssql+pyodbc://{server}/{database}?driver=ODBC+Driver+17+for+SQL+Server&Trusted_Connection=yes")
+
+       # Create a cursor
+       cursor = connection.cursor()
+
+       for index, player in enumerate(data['stats']['content'], start=1):
+           player_name = player['owner']['name']['display']
+
+       # Check if 'currentTeam' key exists in the 'owner' dictionary. 
+           if 'owner' in player and 'currentTeam' in player['owner'] and 'name' in player['owner']['currentTeam']:
+               team_name = player['owner']['currentTeam']['name']
+           else:
+               team_name = "Unknown Team"
+
+           goals = player['value']
+           
+           # Append player information to the list
+           player_data = {"Index": index, "Player Name": player_name, "Team Name": team_name, "Goals": int(goals)}
+
+           # Execute SQL query using the cursor with square brackets around 'Index'
+           cursor.execute("INSERT INTO FootballStats ([Index], PlayerName, TeamName, Goals) VALUES (?, ?, ?, ?)",
+              player_data["Index"], player_data["Player Name"], player_data["Team Name"], player_data["Goals"])
+
+
+       # Commit the changes to the database
+       connection.commit()
+
+       print(f"Data successfully imported into the database.")
+   except Exception as e:
+       print(f"Error during database operation: {e}")
+   finally:
+       # Close the cursor
+       cursor.close()
+
+       # Close the database connection
+       connection.close()
+
+else:
+   print(f"Request failed with status code: {response.status_code}")
+
+
+# In[ ]:
+
+
+# I have checked if it got imported to db properly, using Query in SQL Server Management Studio 2019
+
+get_ipython().run_line_magic('sql', 'SELECT * FROM FootballStats')
+
+
+# In[ ]:
+
+
+
+
